@@ -1,0 +1,45 @@
+<div class="page">
+  <header class="hero">
+    <div>
+      <div class="eyebrow">BSE • FINANCIAL RESULTS CALENDAR</div>
+      <h1>Company Result Calendar</h1>
+      <p>Upcoming BSE companies with announced financial-result meeting dates, starting from the present date.</p>
+    </div>
+    <a href="https://api.bseindia.com/BseIndiaAPI/api/Corpforthresults/w" target="_blank" rel="noopener">BSE Result API ↗</a>
+  </header>
+
+  <section class="controls card">
+    <label>From Date<input type="date" [(ngModel)]="fromDate" [min]="today"></label>
+    <label>To Date<input type="date" [(ngModel)]="toDate" [min]="fromDate"></label>
+    <label class="company-filter">Company / Symbol<input [(ngModel)]="symbol" placeholder="e.g. TCS, INFY, HDFCBANK" (keyup.enter)="load()"></label>
+    <button (click)="load()" [disabled]="loading">{{ loading ? 'Loading…' : 'Load Results' }}</button>
+  </section>
+
+  <div class="notice">Source: BSE Corporate Forthcoming Results API. Showing companies from <strong>today onward</strong>, sorted by meeting date. Telegram alerts are sent only for newly detected companies after the first baseline run.</div>
+  <div *ngIf="error" class="error">{{ error }}</div>
+
+  <section class="card">
+    <div class="section-head">
+      <div><h2>Financial Results</h2><span>{{ events.length }} companies</span></div>
+      <small *ngIf="lastUpdated">Updated {{ lastUpdated | date:'dd-MMM-yyyy HH:mm:ss' }}</small>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Meeting Date</th><th>BSE Code</th><th>Symbol</th><th>Company</th><th>BSE Link</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let r of events; let i = index">
+            <td>{{ i + 1 }}</td>
+            <td><strong>{{ r.meetingDate }}</strong></td>
+            <td><strong>{{ r.scripCode }}</strong></td>
+            <td><strong>{{ r.symbol }}</strong></td>
+            <td>{{ r.company }}</td>
+            <td><a [href]="r.url" target="_blank" rel="noopener">View ↗</a></td>
+          </tr>
+          <tr *ngIf="!loading && !events.length"><td colspan="6" class="empty">No upcoming BSE result dates found for the selected period.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Data source: BSE India • API: Corpforthresults/w • Results shown from the present date</footer>
+</div>
