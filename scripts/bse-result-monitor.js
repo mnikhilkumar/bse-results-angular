@@ -57,33 +57,97 @@ function telegramMessage(rows) {
 
 async function sendTelegram(message) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatIds = process.env.TELEGRAM_CHAT_ID
+
+  const chatIds = (process.env.TELEGRAM_CHAT_ID || '')
     .split(',')
     .map(id => id.trim())
     .filter(Boolean);
 
-  for (const chatId of chatIds) {
-    const response = await fetch(
-      `https://api.telegram.org/bot${botToken}/sendMessage`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: message,
-          parse_mode: 'HTML'
-        })
+  if (!botToken) {
+    throw new Error('TELEGRAM_BOT_TOKEN is missing');
+  }
+
+  if (chatIds.length === 0) {
+    throw new Error('TELEGRAM_CHAT_ID is missing');
+  }
+
+  // Telegram allows max 4096 characters.
+  // Keep some margin for safety.
+  const MAX_LENGTH = 3800;
+
+  function splitMessage(text) {
+    const chunks = [];
+    let remaining = String(text);
+
+    while (remaining.length > MAX_LENGTH) {
+      // Prefer splitting at a newline.
+      let splitAt = remaining.lastIndexOf('\n', MAX_LENGTH);
+
+      // If there is no suitable newline, split at a space.
+      if (splitAt < MAX_LENGTH * 0.5) {
+        splitAt = remaining.lastIndexOf(' ', MAX_LENGTH);
       }
-    );
 
-    const data = await response.json();
+      // Last fallback: hard split.
+      if (splitAt <= 0) {
+        splitAt = MAX_LENGTH;
+      }
 
-    if (!response.ok) {
-      throw new Error(
-        `Telegram HTTP ${response.status} for chat ${chatId}: ${JSON.stringify(data)}`
-      );
+      chunks.push(remaining.slice(0, splitAt));
+      remaining = remaining.slice(splitAt).trimStart();
+    }
+
+    if (remaining.length > 0) {
+      chunks.push(remaining);
+    }
+
+    return chunks;
+  }
+
+  const chunks = splitMessage(message);
+
+  console.log(
+    `Telegram: sending ${chunks.length} message(s) to ${chatIds.length} chat(s)`
+  );
+
+  for (const chatId of chatIds) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+
+      try {
+        const response = await fetch(
+          `https://api.telegram.org/bot${botToken}/sendMessage`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: chunk
+            })
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          throw new Error(
+            `Telegram HTTP ${response.status} for chat ${chatId}: ${JSON.stringify(data)}`
+          );
+        }
+
+        console.log(
+          `Telegram: sent ${i + 1}/${chunks.length} to chat ${chatId}`
+        );
+      } catch (error) {
+        console.error(
+          `Telegram failed for chat ${chatId}, message ${i + 1}/${chunks.length}:`,
+          error.message
+        );
+
+        // Continue with other chats instead of killing the BSE monitor.
+      }
     }
   }
 }
