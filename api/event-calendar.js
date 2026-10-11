@@ -1,103 +1,142 @@
 const { bseJson, send } = require('./_bse');
+const { nseJson } = require('./_nse');
 
 const BSE_ENDPOINT = '/Corpforthresults/w';
+const NSE_SOURCE_URL = 'https://www.nseindia.com/companies-listing/corporate-filings-event-calendar';
+const BSE_SOURCE_URL = 'https://www.bseindia.com/corporates/corporate_act.aspx';
 
-function parseBseDate(value) {
-  const m = String(value || '').trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
-  if (!m) return Number.MAX_SAFE_INTEGER;
-  const months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-  const month = months[m[2]];
-  if (month === undefined) return Number.MAX_SAFE_INTEGER;
-  return Date.UTC(Number(m[3]), month, Number(m[1]));
+function parseDate(value) {
+  const s = String(value || '').trim();
+  let m = s.match(/^(\d{1,2})[- /]([A-Za-z]{3})[- /](\d{4})$/i);
+  if (m) {
+    const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+    const month = months[m[2].toLowerCase()];
+    if (month !== undefined) return Date.UTC(Number(m[3]), month, Number(m[1]));
+  }
+  m = s.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+  if (m) return Date.UTC(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return Date.UTC(Number(m[3]), Number(m[2])-1, Number(m[1]));
+  const parsed = Date.parse(s);
+  return Number.isFinite(parsed) ? Date.UTC(new Date(parsed).getUTCFullYear(), new Date(parsed).getUTCMonth(), new Date(parsed).getUTCDate()) : Number.MAX_SAFE_INTEGER;
 }
 
-function formatIsoDate(ms) {
+function formatDisplayDate(value) {
+  const ms = parseDate(value);
+  if (ms === Number.MAX_SAFE_INTEGER) return String(value || '').trim();
   const d = new Date(ms);
-  return d.toISOString().slice(0, 10);
+  return `${String(d.getUTCDate()).padStart(2,'0')} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 function indiaTodayIso() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(new Date());
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
   const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}`;
 }
-
-function addDaysIso(iso, days) {
-  const ms = Date.parse(`${iso}T00:00:00Z`) + days * 86400000;
-  return formatIsoDate(ms);
-}
-
-function toBseDate(value) {
-  const m = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  return `${m[1]}${m[2]}${m[3]}`;
-}
-
+function addDaysIso(iso, days) { return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0,10); }
+function toBseDate(iso) { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[1]}${m[2]}${m[3]}` : null; }
 function extractRows(raw) {
   if (Array.isArray(raw)) return raw;
-  if (Array.isArray(raw?.Table)) return raw.Table;
-  if (Array.isArray(raw?.data)) return raw.data;
-  if (Array.isArray(raw?.Data)) return raw.Data;
+  for (const key of ['Table','table','data','Data','records','rows','result','events','eventCalendar','event_calendar']) if (Array.isArray(raw?.[key])) return raw[key];
   return [];
 }
-
-function normalizeRows(raw) {
-  return extractRows(raw)
-    .map(row => ({
-      scripCode: String(row?.scrip_Code ?? row?.scripCode ?? row?.Scrip_Code ?? '').trim(),
-      symbol: String(row?.short_name ?? row?.shortName ?? row?.symbol ?? '').trim(),
-      company: String(row?.Long_Name ?? row?.long_name ?? row?.company ?? '').trim(),
-      meetingDate: String(row?.meeting_date ?? row?.meetingDate ?? row?.date ?? '').trim(),
-      url: String(row?.URL ?? row?.url ?? '').trim()
-    }))
-    .filter(row => row.scripCode && row.company && row.meetingDate)
-    .sort((a, b) => parseBseDate(a.meetingDate) - parseBseDate(b.meetingDate) || a.symbol.localeCompare(b.symbol));
+function isFinancialResultsText(value) { return /financial\s*results?|quarterly\s*results?|unaudited\s+results?|audited\s+results?/i.test(String(value || '')); }
+function safeBseUrl(row, code) {
+  const raw = String(row?.URL ?? row?.url ?? '').trim();
+  if (/^https:\/\/www\.bseindia\.com\//i.test(raw)) return raw;
+  const slug = String(row?.slug ?? '').trim();
+  if (slug && /^[a-z0-9-]+$/i.test(slug)) return `https://www.bseindia.com/stock-share-price/${slug}/${slug}/${code}/`;
+  return `https://www.bseindia.com/stock-share-price/`;
 }
-
+function normalizeBseRows(raw) {
+  return extractRows(raw).map(row => {
+    const code = String(row?.scrip_Code ?? row?.scripCode ?? row?.Scrip_Code ?? row?.scripcode ?? '').trim();
+    const date = String(row?.meeting_date ?? row?.meetingDate ?? row?.date ?? row?.MeetingDate ?? '').trim();
+    const company = String(row?.Long_Name ?? row?.long_name ?? row?.company ?? row?.CompanyName ?? '').trim();
+    const symbol = String(row?.short_name ?? row?.shortName ?? row?.symbol ?? '').trim();
+    return {
+      id: `BSE|${code}|${formatDisplayDate(date)}`, exchange: 'BSE', scripCode: code, bseCode: code, nseSymbol: '', symbol,
+      company, meetingDate: formatDisplayDate(date), resultsDate: formatDisplayDate(date), purpose: String(row?.purpose ?? row?.Purpose ?? 'Financial Results').trim(),
+      url: safeBseUrl(row, code), bseUrl: safeBseUrl(row, code), nseUrl: '', sources: ['BSE']
+    };
+  }).filter(row => row.scripCode && row.company && row.meetingDate && parseDate(row.meetingDate) !== Number.MAX_SAFE_INTEGER);
+}
+function normalizeNseRows(raw) {
+  return extractRows(raw).map(row => {
+    const symbol = String(row?.symbol ?? row?.SYMBOL ?? row?.sm_symbol ?? row?.nseSymbol ?? row?.Symbol ?? '').trim().toUpperCase();
+    const company = String(row?.company ?? row?.companyName ?? row?.company_name ?? row?.COMPANY ?? row?.sm_name ?? row?.companyname ?? row?.Company ?? '').trim();
+    const purpose = String(row?.purpose ?? row?.bm_purpose ?? row?.bm_desc ?? row?.description ?? row?.subject ?? row?.PURPOSE ?? row?.event ?? row?.eventType ?? '').trim();
+    const date = String(row?.meeting_date ?? row?.meetingDate ?? row?.bm_date ?? row?.date ?? row?.meetingDateTime ?? row?.meeting_date_time ?? row?.DATE ?? row?.eventDate ?? row?.meeting_date_str ?? '').trim();
+    if (!isFinancialResultsText(purpose)) return null;
+    const displayDate = formatDisplayDate(date);
+    return {
+      id: `NSE|${symbol}|${displayDate}`, exchange: 'NSE', scripCode: '', bseCode: '', nseSymbol: symbol, symbol,
+      company, meetingDate: displayDate, resultsDate: displayDate, purpose,
+      url: `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`,
+      bseUrl: '', nseUrl: `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`, sources: ['NSE']
+    };
+  }).filter(row => row && row.nseSymbol && row.company && row.meetingDate && parseDate(row.meetingDate) !== Number.MAX_SAFE_INTEGER);
+}
 function filterFromToday(rows, todayIso = indiaTodayIso()) {
-  const todayMs = Date.parse(`${todayIso}T00:00:00Z`);
-  return rows.filter(row => parseBseDate(row.meetingDate) >= todayMs);
+  const min = Date.parse(`${todayIso}T00:00:00Z`);
+  return rows.filter(row => parseDate(row.meetingDate) >= min);
 }
-
-function mapApiRows(raw, todayIso = indiaTodayIso()) {
-  return filterFromToday(normalizeRows(raw), todayIso);
+function mergeRows(bseRows, nseRows) {
+  // Keep exchange listings distinct in the table/alerts, but merge links when the same company/date is obvious.
+  const result = [];
+  const byCompanyDate = new Map();
+  for (const row of [...bseRows, ...nseRows]) {
+    const normCompany = row.company.toLowerCase().replace(/\b(limited|ltd|india|company|corporation)\b/g, '').replace(/[^a-z0-9]/g, '');
+    const key = `${normCompany}|${row.meetingDate}`;
+    const prior = byCompanyDate.get(key);
+    if (!prior) {
+      const copy = { ...row, sources: [...row.sources] };
+      byCompanyDate.set(key, copy); result.push(copy); continue;
+    }
+    if (row.exchange === 'BSE') { prior.bseCode = row.bseCode; prior.bseUrl = row.bseUrl; prior.scripCode = row.scripCode; }
+    if (row.exchange === 'NSE') { prior.nseSymbol = row.nseSymbol; prior.nseUrl = row.nseUrl; if (!prior.symbol) prior.symbol = row.symbol; }
+    if (!prior.sources.includes(row.exchange)) prior.sources.push(row.exchange);
+    if (prior.exchange !== row.exchange) prior.exchange = 'NSE+BSE';
+    prior.url = prior.bseUrl || prior.nseUrl || prior.url;
+  }
+  return result.sort((a,b) => parseDate(a.meetingDate)-parseDate(b.meetingDate) || a.company.localeCompare(b.company));
+}
+async function fetchCombinedRows(fromIso, toIso, { bseFetcher = bseJson, nseFetcher = nseJson } = {}) {
+  const bsePath = `${BSE_ENDPOINT}?fromdate=${toBseDate(fromIso)}&todate=${toBseDate(toIso)}`;
+  const results = await Promise.allSettled([
+    bseFetcher(bsePath).then(raw => normalizeBseRows(raw)),
+    nseFetcher(fromIso, toIso).then(raw => normalizeNseRows(raw))
+  ]);
+  const bse = results[0].status === 'fulfilled' ? results[0].value : [];
+  const nse = results[1].status === 'fulfilled' ? results[1].value : [];
+  const errors = [];
+  if (results[0].status === 'rejected') errors.push(`BSE: ${results[0].reason?.message || results[0].reason}`);
+  if (results[1].status === 'rejected') errors.push(`NSE: ${results[1].reason?.message || results[1].reason}`);
+  if (errors.length === 2) throw new Error(`Both exchanges failed. ${errors.join(' | ')}`);
+  return { data: mergeRows(filterFromToday(bse, fromIso), filterFromToday(nse, fromIso)), bseCount: bse.length, nseCount: nse.length, errors };
 }
 
 module.exports = async function(req, res) {
   try {
-    const u = new URL(req.url, 'https://vercel.local');
+    const u = new URL(req.url, 'https://local');
     const today = indiaTodayIso();
     const requestedFrom = u.searchParams.get('from_date') || today;
     const requestedTo = u.searchParams.get('to_date') || addDaysIso(today, 91);
     const fromIso = requestedFrom < today ? today : requestedFrom;
     const toIso = requestedTo < fromIso ? addDaysIso(fromIso, 91) : requestedTo;
-    const from = toBseDate(fromIso);
-    const to = toBseDate(toIso);
-    if (!from || !to) return send(res, 400, { message: 'from_date and to_date must use YYYY-MM-DD format' });
-
-    const query = new URLSearchParams({ fromdate: from, todate: to });
-    const raw = await bseJson(`${BSE_ENDPOINT}?${query.toString()}`);
-    const data = mapApiRows(raw, today);
-
-    return send(res, 200, {
-      data,
-      from_date: fromIso,
-      to_date: toIso,
-      today,
-      count: data.length,
-      updatedAt: new Date().toISOString(),
-      source: `https://api.bseindia.com/BseIndiaAPI/api/Corpforthresults/w?fromdate=${from}&todate=${to}`
-    });
+    if (!toBseDate(fromIso) || !toBseDate(toIso)) return send(res, 400, { message: 'from_date and to_date must use YYYY-MM-DD format' });
+    const combined = await fetchCombinedRows(fromIso, toIso);
+    return send(res, 200, { data: combined.data, from_date: fromIso, to_date: toIso, today, count: combined.data.length, bseCount: combined.bseCount, nseCount: combined.nseCount, sourceStatus: combined.errors, updatedAt: new Date().toISOString(), source: 'BSE India + NSE India' });
   } catch (e) {
-    return send(res, 502, { message: `Unable to fetch BSE result calendar: ${e.message}` });
+    return send(res, 502, { message: `Unable to fetch result calendar from NSE/BSE: ${e.message}` });
   }
 };
 
-module.exports.normalizeRows = normalizeRows;
+module.exports.normalizeBseRows = normalizeBseRows;
+module.exports.normalizeNseRows = normalizeNseRows;
 module.exports.filterFromToday = filterFromToday;
-module.exports.mapApiRows = mapApiRows;
-module.exports.parseBseDate = parseBseDate;
+module.exports.parseBseDate = parseDate;
 module.exports.indiaTodayIso = indiaTodayIso;
 module.exports.addDaysIso = addDaysIso;
+module.exports.mergeRows = mergeRows;
+module.exports.fetchCombinedRows = fetchCombinedRows;

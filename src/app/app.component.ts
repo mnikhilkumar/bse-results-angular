@@ -5,9 +5,17 @@ import { FormsModule } from '@angular/forms';
 
 interface ResultEvent {
   scripCode: string;
+  bseCode: string;
+  nseSymbol: string;
+  exchange: string;
+  sources: string[];
   symbol: string;
   company: string;
   meetingDate: string;
+  resultsDate: string;
+  purpose: string;
+  bseUrl: string;
+  nseUrl: string;
   url: string;
 }
 
@@ -26,6 +34,9 @@ export class AppComponent {
   loading = false;
   error = '';
   lastUpdated = '';
+  bseCount = 0;
+  nseCount = 0;
+  sourceStatus: string[] = [];
   today = this.offsetDate(0);
 
   ngOnInit() { this.load(); }
@@ -36,17 +47,20 @@ export class AppComponent {
     if (this.fromDate < this.today) this.fromDate = this.today;
     if (this.toDate < this.fromDate) this.toDate = this.fromDate;
     const params = new URLSearchParams({ from_date: this.fromDate, to_date: this.toDate });
-    this.http.get<{data: ResultEvent[]; updatedAt: string; today: string}>(`/api/event-calendar?${params}`)
+    this.http.get<{data: ResultEvent[]; updatedAt: string; today: string; bseCount: number; nseCount: number; sourceStatus: string[]}>(`/api/event-calendar?${params}`)
       .subscribe({
         next: r => {
           const filter = this.symbol.trim().toUpperCase();
           this.events = (r.data || []).filter(x => !filter || x.symbol.toUpperCase().includes(filter) || x.company.toUpperCase().includes(filter));
           this.lastUpdated = r.updatedAt;
           this.today = r.today || this.today;
+          this.bseCount = r.bseCount || 0;
+          this.nseCount = r.nseCount || 0;
+          this.sourceStatus = r.sourceStatus || [];
           this.loading = false;
         },
         error: e => {
-          this.error = e?.error?.message || 'Unable to load BSE financial result dates.';
+          this.error = e?.error?.message || 'Unable to load NSE/BSE financial result dates.';
           this.loading = false;
         }
       });

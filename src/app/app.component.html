@@ -1,11 +1,11 @@
 <div class="page">
   <header class="hero">
     <div>
-      <div class="eyebrow">BSE • FINANCIAL RESULTS CALENDAR</div>
+      <div class="eyebrow">NSE + BSE • FINANCIAL RESULTS CALENDAR</div>
       <h1>Company Result Calendar</h1>
-      <p>Upcoming BSE companies with announced financial-result meeting dates, starting from the present date.</p>
+      <p>Upcoming NSE and BSE companies with announced financial-result meeting dates, starting from the present date.</p>
     </div>
-    <a href="https://api.bseindia.com/BseIndiaAPI/api/Corpforthresults/w" target="_blank" rel="noopener">BSE Result API ↗</a>
+    <a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" rel="noopener">NSE Event Calendar ↗</a>
   </header>
 
   <section class="controls card">
@@ -15,8 +15,9 @@
     <button (click)="load()" [disabled]="loading">{{ loading ? 'Loading…' : 'Load Results' }}</button>
   </section>
 
-  <div class="notice">Source: BSE Corporate Forthcoming Results API. Showing companies from <strong>today onward</strong>, sorted by meeting date. Telegram alerts are sent only for newly detected companies after the first baseline run.</div>
+  <div class="notice">Sources: BSE Corporate Forthcoming Results API + NSE Event Calendar API. Only meetings mentioning financial results are included. Showing dates from <strong>today onward</strong>, sorted by scheduled results/meeting date. The expected results date is the announced board meeting date, not a guarantee of the exact publication time.</div>
   <div *ngIf="error" class="error">{{ error }}</div>
+  <div class="notice" *ngIf="!loading && nseCount === 0">NSE returned 0 matching financial-results events. BSE: {{ bseCount }} events; NSE: {{ nseCount }} events. <span *ngIf="sourceStatus.length">Source issue: {{ sourceStatus.join("; ") }}</span></div>
 
   <section class="card">
     <div class="section-head">
@@ -25,21 +26,22 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>#</th><th>Meeting Date</th><th>BSE Code</th><th>Symbol</th><th>Company</th><th>BSE Link</th></tr></thead>
+        <thead><tr><th>#</th><th>Expected Results Date</th><th>Exchange</th><th>BSE Code</th><th>NSE Symbol</th><th>Company</th><th>Exchange Links</th></tr></thead>
         <tbody>
           <tr *ngFor="let r of events; let i = index">
             <td>{{ i + 1 }}</td>
-            <td><strong>{{ r.meetingDate }}</strong></td>
-            <td><strong>{{ r.scripCode }}</strong></td>
-            <td><strong>{{ r.symbol }}</strong></td>
+            <td><strong>{{ r.resultsDate || r.meetingDate }}</strong><small class="muted">Scheduled meeting date</small></td>
+            <td><strong>{{ (r.sources || [r.exchange]).join(' + ' ) }}</strong></td>
+            <td><strong>{{ r.bseCode || r.scripCode || '—' }}</strong></td>
+            <td><strong>{{ r.nseSymbol || '—' }}</strong></td>
             <td>{{ r.company }}</td>
-            <td><a [href]="r.url" target="_blank" rel="noopener">View ↗</a></td>
+            <td><a *ngIf="r.bseUrl" [href]="r.bseUrl" target="_blank" rel="noopener">BSE ↗</a> <a *ngIf="r.nseUrl" [href]="r.nseUrl" target="_blank" rel="noopener">NSE ↗</a></td>
           </tr>
-          <tr *ngIf="!loading && !events.length"><td colspan="6" class="empty">No upcoming BSE result dates found for the selected period.</td></tr>
+          <tr *ngIf="!loading && !events.length"><td colspan="7" class="empty">No upcoming NSE/BSE result dates found for the selected period.</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
-  <footer>Data source: BSE India • API: Corpforthresults/w • Results shown from the present date</footer>
+  <footer>Data sources: BSE India + NSE India • Expected results date = scheduled board meeting date</footer>
 </div>

@@ -16,7 +16,7 @@ The API normalizes BSE fields such as `scrip_Code`, `short_name`, `Long_Name`, `
 
 ## Telegram alerts
 
-GitHub Actions checks every 30 minutes. It compares the current BSE result calendar against `data/bse-result-state.json`.
+GitHub Actions checks every 30 minutes. It compares the current NSE + BSE result calendar against `data/bse-result-state.json`.
 
 - First run: creates a baseline and sends no alerts.
 - Later runs: sends a Telegram message only for newly detected company/date events.
@@ -51,3 +51,8 @@ The included test uses the supplied BSE result-calendar JSON as a fixture and al
 `GET /api/event-calendar?from_date=2026-09-29&to_date=2026-12-29`
 
 If the requested start date is before today, the server clamps it to today's Indian date.
+
+
+## Data sources
+
+The calendar combines the BSE Corporate Forthcoming Results endpoint and NSE corporate board-meeting endpoint, filtering NSE board meetings to purposes that mention financial results. The expected results date shown is the scheduled board meeting date and is not a guarantee of the actual publication time. If one exchange is unavailable, the API reports a partial-source warning and serves the other exchange; if both fail, it returns an explicit error.
